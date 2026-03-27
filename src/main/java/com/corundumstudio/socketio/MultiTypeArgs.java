@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,8 +50,9 @@ public class MultiTypeArgs implements Iterable<Object> {
     /**
      * "index out of bounds"-safe method for getting elements
      *
-     * @param index
-     * @return
+     * @param <T> type of argument
+     * @param index to get
+     * @return argument
      */
     public <T> T get(int index) {
         if (size() <= index) {

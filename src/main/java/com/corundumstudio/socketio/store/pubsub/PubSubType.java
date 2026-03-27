@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package com.corundumstudio.socketio.store.pubsub;
 
 public enum PubSubType {
 
-    CONNECT, DISCONNECT, JOIN, LEAVE, DISPATCH;
+    CONNECT, DISCONNECT, JOIN, BULK_JOIN, LEAVE, BULK_LEAVE, DISPATCH;
 
     @Override
     public String toString() {

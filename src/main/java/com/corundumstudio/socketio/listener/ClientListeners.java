@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,17 +15,33 @@
  */
 package com.corundumstudio.socketio.listener;
 
+
 public interface ClientListeners {
 
     void addMultiTypeEventListener(String eventName, MultiTypeEventListener listener, Class<?> ... eventClass);
 
     <T> void addEventListener(String eventName, Class<T> eventClass, DataListener<T> listener);
 
+    void addEventInterceptor(EventInterceptor eventInterceptor);
+
     void addDisconnectListener(DisconnectListener listener);
 
     void addConnectListener(ConnectListener listener);
 
+    /**
+     * from v4, ping will always be sent by server except probe ping packet sent from client,
+     * and pong will always be responded by client while receiving ping except probe pong packet responded from server
+     * it makes no more sense to listen to ping packet, instead you can listen to pong packet
+     * @deprecated use addPongListener instead
+     * @param listener
+     */
+    @Deprecated
+    void addPingListener(PingListener listener);
+    void addPongListener(PongListener listener);
+
     void addListeners(Object listeners);
+
+    <L> void addListeners(Iterable<L> listeners);
 
     void addListeners(Object listeners, Class<?> listenersClass);
 

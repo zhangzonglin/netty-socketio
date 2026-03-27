@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,9 @@
  */
 package com.corundumstudio.socketio;
 
+import com.corundumstudio.socketio.listener.*;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.FixedRecvByteBufAllocator;
-import io.netty.channel.ServerChannel;
+import io.netty.channel.*;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -28,17 +26,14 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.FutureListener;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.corundumstudio.socketio.listener.ClientListeners;
-import com.corundumstudio.socketio.listener.ConnectListener;
-import com.corundumstudio.socketio.listener.DataListener;
-import com.corundumstudio.socketio.listener.DisconnectListener;
-import com.corundumstudio.socketio.listener.MultiTypeEventListener;
 import com.corundumstudio.socketio.namespace.Namespace;
 import com.corundumstudio.socketio.namespace.NamespacesHub;
 
@@ -84,8 +79,8 @@ public class SocketIOServer implements ClientListeners {
     /**
      * Get client by uuid from default namespace
      *
-     * @param uuid
-     * @return
+     * @param uuid - id of client
+     * @return client
      */
     public SocketIOClient getClient(UUID uuid) {
         return namespacesHub.get(Namespace.DEFAULT_NAME).getClient(uuid);
@@ -101,19 +96,38 @@ public class SocketIOServer implements ClientListeners {
     }
 
     public BroadcastOperations getBroadcastOperations() {
-        return new BroadcastOperations(getAllClients(), configCopy.getStoreFactory());
+        Collection<SocketIONamespace> namespaces = namespacesHub.getAllNamespaces();
+        List<BroadcastOperations> list = new ArrayList<BroadcastOperations>();
+        BroadcastOperations broadcast = null;
+        if( namespaces != null && namespaces.size() > 0 ) {
+            for( SocketIONamespace n : namespaces ) {
+                broadcast = n.getBroadcastOperations();
+                list.add( broadcast );
+            }
+        }
+        return new MultiRoomBroadcastOperations( list );
     }
 
     /**
      * Get broadcast operations for clients within
-     * room by <code>room</code> name
+     * rooms by <code>rooms'</code> names
      *
-     * @param room
-     * @return
+     * @param rooms rooms' names
+     * @return broadcast operations
      */
-    public BroadcastOperations getRoomOperations(String room) {
-        Iterable<SocketIOClient> clients = namespacesHub.getRoomClients(room);
-        return new BroadcastOperations(clients, configCopy.getStoreFactory());
+    public BroadcastOperations getRoomOperations(String... rooms) {
+        Collection<SocketIONamespace> namespaces = namespacesHub.getAllNamespaces();
+        List<BroadcastOperations> list = new ArrayList<BroadcastOperations>();
+        BroadcastOperations broadcast = null;
+        if( namespaces != null && namespaces.size() > 0 ) {
+            for( SocketIONamespace n : namespaces ) {
+				for ( String room : rooms ) {
+                    broadcast = n.getRoomOperations( room );
+                    list.add( broadcast );
+                }
+			}
+        }
+        return new MultiRoomBroadcastOperations( list );
     }
 
     /**
@@ -125,6 +139,8 @@ public class SocketIOServer implements ClientListeners {
 
     /**
      * Start server asynchronously
+     * 
+     * @return void
      */
     public Future<Void> startAsync() {
         log.info("Session store / pubsub factory used: {}", configCopy.getStoreFactory());
@@ -170,9 +186,16 @@ public class SocketIOServer implements ClientListeners {
             bootstrap.childOption(ChannelOption.SO_RCVBUF, config.getTcpReceiveBufferSize());
             bootstrap.childOption(ChannelOption.RCVBUF_ALLOCATOR, new FixedRecvByteBufAllocator(config.getTcpReceiveBufferSize()));
         }
-        bootstrap.childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive());
+        //default value @see WriteBufferWaterMark.DEFAULT
+        if (config.getWriteBufferWaterMarkLow() != -1 && config.getWriteBufferWaterMarkHigh() != -1) {
+            bootstrap.childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new WriteBufferWaterMark(
+                    config.getWriteBufferWaterMarkLow(), config.getWriteBufferWaterMarkHigh()
+            ));
+        }
 
-        bootstrap.option(ChannelOption.SO_LINGER, config.getSoLinger());
+        bootstrap.childOption(ChannelOption.SO_KEEPALIVE, config.isTcpKeepAlive());
+        bootstrap.childOption(ChannelOption.SO_LINGER, config.getSoLinger());
+
         bootstrap.option(ChannelOption.SO_REUSEADDR, config.isReuseAddress());
         bootstrap.option(ChannelOption.SO_BACKLOG, config.getAcceptBackLog());
     }
@@ -232,6 +255,13 @@ public class SocketIOServer implements ClientListeners {
     }
 
     @Override
+    public void addEventInterceptor(EventInterceptor eventInterceptor) {
+        mainNamespace.addEventInterceptor(eventInterceptor);
+
+    }
+
+
+    @Override
     public void removeAllListeners(String eventName) {
         mainNamespace.removeAllListeners(eventName);
     }
@@ -247,10 +277,24 @@ public class SocketIOServer implements ClientListeners {
     }
 
     @Override
+    public void addPingListener(PingListener listener) {
+        mainNamespace.addPingListener(listener);
+    }
+    @Override
+    public void addPongListener(PongListener listener) {
+        mainNamespace.addPongListener(listener);
+    }
+
+    @Override
     public void addListeners(Object listeners) {
         mainNamespace.addListeners(listeners);
     }
-    
+
+    @Override
+    public <L> void addListeners(Iterable<L> listeners) {
+        mainNamespace.addListeners(listeners);
+    }
+
     @Override
     public void addListeners(Object listeners, Class<?> listenersClass) {
         mainNamespace.addListeners(listeners, listenersClass);

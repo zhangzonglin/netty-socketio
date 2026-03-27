@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,19 +15,6 @@
  */
 package com.corundumstudio.socketio.handler;
 
-import java.net.SocketAddress;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Queue;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.corundumstudio.socketio.Configuration;
 import com.corundumstudio.socketio.DisconnectableHub;
 import com.corundumstudio.socketio.HandshakeData;
@@ -35,6 +22,7 @@ import com.corundumstudio.socketio.Transport;
 import com.corundumstudio.socketio.ack.AckManager;
 import com.corundumstudio.socketio.messages.OutPacketMessage;
 import com.corundumstudio.socketio.namespace.Namespace;
+import com.corundumstudio.socketio.protocol.EngineIOVersion;
 import com.corundumstudio.socketio.protocol.Packet;
 import com.corundumstudio.socketio.protocol.PacketType;
 import com.corundumstudio.socketio.scheduler.CancelableScheduler;
@@ -43,13 +31,20 @@ import com.corundumstudio.socketio.scheduler.SchedulerKey.Type;
 import com.corundumstudio.socketio.store.Store;
 import com.corundumstudio.socketio.store.StoreFactory;
 import com.corundumstudio.socketio.transport.NamespaceClient;
-
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.util.AttributeKey;
 import io.netty.util.internal.PlatformDependent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.SocketAddress;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ClientHead {
 
@@ -63,11 +58,13 @@ public class ClientHead {
     private final HandshakeData handshakeData;
     private final UUID sessionId;
 
+    private final EngineIOVersion engineIOVersion;
+
     private final Store store;
     private final DisconnectableHub disconnectableHub;
     private final AckManager ackManager;
     private ClientsBox clientsBox;
-    private final CancelableScheduler disconnectScheduler;
+    private final CancelableScheduler scheduler;
     private final Configuration configuration;
 
     private Packet lastBinaryPacket;
@@ -76,8 +73,8 @@ public class ClientHead {
     private volatile Transport currentTransport;
 
     public ClientHead(UUID sessionId, AckManager ackManager, DisconnectableHub disconnectable,
-            StoreFactory storeFactory, HandshakeData handshakeData, ClientsBox clientsBox, Transport transport, CancelableScheduler disconnectScheduler,
-            Configuration configuration) {
+                      StoreFactory storeFactory, HandshakeData handshakeData, ClientsBox clientsBox, Transport transport, CancelableScheduler scheduler,
+                      Configuration configuration, Map<String, List<String>> params) {
         this.sessionId = sessionId;
         this.ackManager = ackManager;
         this.disconnectableHub = disconnectable;
@@ -85,11 +82,18 @@ public class ClientHead {
         this.handshakeData = handshakeData;
         this.clientsBox = clientsBox;
         this.currentTransport = transport;
-        this.disconnectScheduler = disconnectScheduler;
+        this.scheduler = scheduler;
         this.configuration = configuration;
 
         channels.put(Transport.POLLING, new TransportState());
         channels.put(Transport.WEBSOCKET, new TransportState());
+
+        List<String> versions = params.getOrDefault(EngineIOVersion.EIO, new ArrayList<String>());
+        if (versions.isEmpty()) {
+            engineIOVersion = EngineIOVersion.UNKNOWN;
+        } else {
+            engineIOVersion = EngineIOVersion.fromValue(versions.get(0));
+        }
     }
 
     public void bindChannel(Channel channel, Transport transport) {
@@ -105,6 +109,14 @@ public class ClientHead {
         sendPackets(transport, channel);
     }
 
+    public void releasePollingChannel(Channel channel) {
+        TransportState state = channels.get(Transport.POLLING);
+        if(channel.equals(state.getChannel())) {
+            clientsBox.remove(channel);
+            state.update(null);
+        }
+    }
+
     public String getOrigin() {
         return handshakeData.getHttpHeaders().get(HttpHeaderNames.ORIGIN);
     }
@@ -113,19 +125,43 @@ public class ClientHead {
         return send(packet, getCurrentTransport());
     }
 
+    public void cancelPing() {
+        SchedulerKey key = new SchedulerKey(Type.PING, sessionId);
+        scheduler.cancel(key);
+    }
     public void cancelPingTimeout() {
         SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
-        disconnectScheduler.cancel(key);
+        scheduler.cancel(key);
     }
 
-    public void schedulePingTimeout() {
-        SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
-        disconnectScheduler.schedule(key, new Runnable() {
+    public void schedulePing() {
+        cancelPing();
+        final SchedulerKey key = new SchedulerKey(Type.PING, sessionId);
+        scheduler.schedule(key, new Runnable() {
             @Override
             public void run() {
                 ClientHead client = clientsBox.get(sessionId);
                 if (client != null) {
-                    client.onChannelDisconnect();
+                    EngineIOVersion version = client.getEngineIOVersion();
+                    //only send ping packet for engine.io version 4
+                    if (EngineIOVersion.V4.equals(version)) {
+                        client.send(new Packet(PacketType.PING, version));
+                    }
+                    schedulePing();
+                }
+            }
+        }, configuration.getPingInterval(), TimeUnit.MILLISECONDS);
+    }
+
+    public void schedulePingTimeout() {
+        cancelPingTimeout();
+        SchedulerKey key = new SchedulerKey(Type.PING_TIMEOUT, sessionId);
+        scheduler.schedule(key, new Runnable() {
+            @Override
+            public void run() {
+                ClientHead client = clientsBox.get(sessionId);
+                if (client != null) {
+                    client.disconnect();
                     log.debug("{} removed due to ping timeout", sessionId);
                 }
             }
@@ -174,6 +210,7 @@ public class ClientHead {
     }
 
     public void onChannelDisconnect() {
+        cancelPing();
         cancelPingTimeout();
 
         disconnected.set(true);
@@ -204,8 +241,12 @@ public class ClientHead {
     }
 
     public void disconnect() {
-        ChannelFuture future = send(new Packet(PacketType.DISCONNECT));
-        future.addListener(ChannelFutureListener.CLOSE);
+        Packet packet = new Packet(PacketType.MESSAGE, engineIOVersion);
+        packet.setSubType(PacketType.DISCONNECT);
+        ChannelFuture future = send(packet);
+		if(future != null) {
+			future.addListener(ChannelFutureListener.CLOSE);
+		}
 
         onChannelDisconnect();
     }
@@ -263,5 +304,21 @@ public class ClientHead {
     public Packet getLastBinaryPacket() {
         return lastBinaryPacket;
     }
+
+    public EngineIOVersion getEngineIOVersion() {
+        return engineIOVersion;
+    }
+
+    /**
+     * Returns true if and only if the I/O thread will perform the requested write operation immediately.
+     * Any write requests made when this method returns false are queued until the I/O thread is ready to process the queued write requests.
+     * @return
+     */
+    public boolean isWritable() {
+        TransportState state = channels.get(getCurrentTransport());
+        Channel channel = state.getChannel();
+        return channel != null && channel.isWritable();
+    }
+
 
 }

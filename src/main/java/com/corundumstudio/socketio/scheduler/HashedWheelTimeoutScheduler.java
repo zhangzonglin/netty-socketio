@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,14 +31,23 @@ import io.netty.util.TimerTask;
 import io.netty.util.internal.PlatformDependent;
 
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
 public class HashedWheelTimeoutScheduler implements CancelableScheduler {
 
     private final ConcurrentMap<SchedulerKey, Timeout> scheduledFutures = PlatformDependent.newConcurrentHashMap();
-    private final HashedWheelTimer executorService = new HashedWheelTimer();
+    private final HashedWheelTimer executorService;
 
     private volatile ChannelHandlerContext ctx;
+    
+    public HashedWheelTimeoutScheduler() {
+        executorService = new HashedWheelTimer();
+    }
+    
+    public HashedWheelTimeoutScheduler(ThreadFactory threadFactory) {
+        executorService = new HashedWheelTimer(threadFactory);
+    }
 
     @Override
     public void update(ChannelHandlerContext ctx) {
@@ -71,11 +80,8 @@ public class HashedWheelTimeoutScheduler implements CancelableScheduler {
                 ctx.executor().execute(new Runnable() {
                     @Override
                     public void run() {
-                        try {
-                            runnable.run();
-                        } finally {
-                            scheduledFutures.remove(key);
-                        }
+                    	scheduledFutures.remove(key);
+                        runnable.run();
                     }
                 });
             }
@@ -89,11 +95,8 @@ public class HashedWheelTimeoutScheduler implements CancelableScheduler {
         Timeout timeout = executorService.newTimeout(new TimerTask() {
             @Override
             public void run(Timeout timeout) throws Exception {
-                try {
-                    runnable.run();
-                } finally {
-                    scheduledFutures.remove(key);
-                }
+                scheduledFutures.remove(key);
+                runnable.run();
             }
         }, delay, unit);
 

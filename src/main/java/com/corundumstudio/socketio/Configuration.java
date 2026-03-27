@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,18 @@
  */
 package com.corundumstudio.socketio;
 
-import java.io.InputStream;
-import java.util.Arrays;
-import java.util.List;
-
 import com.corundumstudio.socketio.handler.SuccessAuthorizationListener;
 import com.corundumstudio.socketio.listener.DefaultExceptionListener;
 import com.corundumstudio.socketio.listener.ExceptionListener;
 import com.corundumstudio.socketio.protocol.JsonSupport;
 import com.corundumstudio.socketio.store.MemoryStoreFactory;
 import com.corundumstudio.socketio.store.StoreFactory;
+import io.netty.handler.codec.http.HttpDecoderConfig;
 
 import javax.net.ssl.KeyManagerFactory;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.List;
 
 public class Configuration {
 
@@ -60,6 +60,8 @@ public class Configuration {
     private InputStream keyStore;
     private String keyStorePassword;
 
+    private String allowHeaders;
+
     private String trustStoreFormat = "JKS";
     private InputStream trustStore;
     private String trustStorePassword;
@@ -82,9 +84,17 @@ public class Configuration {
 
     private String origin;
 
+    private boolean enableCors = true;
+
     private boolean httpCompression = true;
 
     private boolean websocketCompression = true;
+
+    private boolean randomSession = false;
+
+    private boolean needClientAuth = false;
+
+    private HttpRequestDecoderConfiguration httpRequestDecoderConfiguration = new HttpRequestDecoderConfiguration();
 
     public Configuration() {
     }
@@ -101,6 +111,7 @@ public class Configuration {
 
         setPingInterval(conf.getPingInterval());
         setPingTimeout(conf.getPingTimeout());
+        setFirstDataTimeout(conf.getFirstDataTimeout());
 
         setHostname(conf.getHostname());
         setPort(conf.getPort());
@@ -132,7 +143,7 @@ public class Configuration {
         setTrustStorePassword(conf.getTrustStorePassword());
         setKeyManagerFactoryAlgorithm(conf.getKeyManagerFactoryAlgorithm());
 
-        setTransports(conf.getTransports().toArray(new Transport[conf.getTransports().size()]));
+        setTransports(conf.getTransports().toArray(new Transport[0]));
         setMaxHttpContentLength(conf.getMaxHttpContentLength());
         setPackagePrefix(conf.getPackagePrefix());
 
@@ -147,10 +158,15 @@ public class Configuration {
 
         setAddVersionHeader(conf.isAddVersionHeader());
         setOrigin(conf.getOrigin());
+        setEnableCors(conf.isEnableCors());
+        setAllowHeaders(conf.getAllowHeaders());
         setSSLProtocol(conf.getSSLProtocol());
 
         setHttpCompression(conf.isHttpCompression());
         setWebsocketCompression(conf.isWebsocketCompression());
+        setRandomSession(conf.randomSession);
+        setNeedClientAuth(conf.isNeedClientAuth());
+        setHttpRequestDecoderConfiguration(conf.getHttpRequestDecoderConfiguration());
     }
 
     public JsonSupport getJsonSupport() {
@@ -161,7 +177,7 @@ public class Configuration {
      * Allows to setup custom implementation of
      * JSON serialization/deserialization
      *
-     * @param jsonSupport
+     * @param jsonSupport - json mapper
      *
      * @see JsonSupport
      */
@@ -177,7 +193,7 @@ public class Configuration {
      * Optional parameter. If not set then bind address
      * will be 0.0.0.0 or ::0
      *
-     * @param hostname
+     * @param hostname - name of host
      */
     public void setHostname(String hostname) {
         this.hostname = hostname;
@@ -258,7 +274,7 @@ public class Configuration {
     /**
      * SSL key store password
      *
-     * @param keyStorePassword
+     * @param keyStorePassword - password of key store
      */
     public void setKeyStorePassword(String keyStorePassword) {
         this.keyStorePassword = keyStorePassword;
@@ -270,7 +286,7 @@ public class Configuration {
     /**
      * SSL key store stream, maybe appointed to any source
      *
-     * @param keyStore
+     * @param keyStore - key store input stream
      */
     public void setKeyStore(InputStream keyStore) {
         this.keyStore = keyStore;
@@ -282,7 +298,7 @@ public class Configuration {
     /**
      * Key store format
      *
-     * @param keyStoreFormat
+     * @param keyStoreFormat - key store format
      */
     public void setKeyStoreFormat(String keyStoreFormat) {
         this.keyStoreFormat = keyStoreFormat;
@@ -371,7 +387,7 @@ public class Configuration {
 
     /**
      * Authorization listener invoked on every handshake.
-     * Accepts or denies a client by {@code AuthorizationListener.isAuthorized} method.
+     * Accepts or denies a client by {@code AuthorizationListener.getAuthorizationResult} method.
      * <b>Accepts</b> all clients by default.
      *
      * @param authorizationListener - authorization listener itself
@@ -389,7 +405,7 @@ public class Configuration {
      * Exception listener invoked on any exception in
      * SocketIO listener
      *
-     * @param exceptionListener
+     * @param exceptionListener - listener
      *
      * @see com.corundumstudio.socketio.listener.ExceptionListener
      */
@@ -406,7 +422,7 @@ public class Configuration {
     /**
      * TCP socket configuration
      *
-     * @param socketConfig
+     * @param socketConfig - config
      */
     public void setSocketConfig(SocketConfig socketConfig) {
         this.socketConfig = socketConfig;
@@ -418,7 +434,7 @@ public class Configuration {
      *
      * @see AckMode
      *
-     * @param ackMode
+     * @param ackMode - ack mode
      */
     public void setAckMode(AckMode ackMode) {
         this.ackMode = ackMode;
@@ -460,7 +476,7 @@ public class Configuration {
     /**
      * Set maximum websocket frame content length limit
      *
-     * @param maxContentLength
+     * @param maxFramePayloadLength - length
      */
     public void setMaxFramePayloadLength(int maxFramePayloadLength) {
         this.maxFramePayloadLength = maxFramePayloadLength;
@@ -472,7 +488,7 @@ public class Configuration {
     /**
      * Transport upgrade timeout in milliseconds
      *
-     * @param upgradeTimeout
+     * @param upgradeTimeout - upgrade timeout
      */
     public void setUpgradeTimeout(int upgradeTimeout) {
         this.upgradeTimeout = upgradeTimeout;
@@ -483,10 +499,10 @@ public class Configuration {
 
     /**
      * Adds <b>Server</b> header with lib version to http response.
-     * <p/>
+     * <p>
      * Default is <code>true</code>
      *
-     * @param addVersionHeader
+     * @param addVersionHeader - <code>true</code> to add header
      */
     public void setAddVersionHeader(boolean addVersionHeader) {
         this.addVersionHeader = addVersionHeader;
@@ -502,18 +518,35 @@ public class Configuration {
      *
      * If value is <code>null</code> then request <b>ORIGIN</b> header value used.
      *
-     * @param origin
+     * @param origin - origin
      */
     public void setOrigin(String origin) {
         this.origin = origin;
     }
+
     public String getOrigin() {
         return origin;
+    }
+
+    /**
+     * cors dispose
+     * <p>
+     * Default is <code>true</code>
+     *
+     * @param enableCors enableCors
+     */
+    public void setEnableCors(boolean enableCors) {
+        this.enableCors = enableCors;
+    }
+
+    public boolean isEnableCors() {
+        return enableCors;
     }
 
     public boolean isUseLinuxNativeEpoll() {
         return useLinuxNativeEpoll;
     }
+
     public void setUseLinuxNativeEpoll(boolean useLinuxNativeEpoll) {
         this.useLinuxNativeEpoll = useLinuxNativeEpoll;
     }
@@ -521,7 +554,7 @@ public class Configuration {
     /**
      * Set the name of the requested SSL protocol
      *
-     * @param sslProtocol
+     * @param sslProtocol - name of protocol
      */
     public void setSSLProtocol(String sslProtocol) {
         this.sslProtocol = sslProtocol;
@@ -530,12 +563,24 @@ public class Configuration {
         return sslProtocol;
     }
 
+
+    /**
+     * Set the response Access-Control-Allow-Headers
+     * @param allowHeaders - allow headers
+     * */
+    public void setAllowHeaders(String allowHeaders) {
+        this.allowHeaders = allowHeaders;
+    }
+    public String getAllowHeaders() {
+        return allowHeaders;
+    }
+
     /**
      * Timeout between channel opening and first data transfer
      * Helps to avoid 'silent channel' attack and prevents
      * 'Too many open files' problem in this case
      *
-     * @param firstDataTimeout
+     * @param firstDataTimeout - timeout value
      */
     public void setFirstDataTimeout(int firstDataTimeout) {
         this.firstDataTimeout = firstDataTimeout;
@@ -547,10 +592,10 @@ public class Configuration {
     /**
      * Activate http protocol compression. Uses {@code gzip} or
      * {@code deflate} encoding choice depends on the {@code "Accept-Encoding"} header value.
-     * <p/>
+     * <p>
      * Default is <code>true</code>
      *
-     * @param httpCompression
+     * @param httpCompression - <code>true</code> to use http compression
      */
     public void setHttpCompression(boolean httpCompression) {
         this.httpCompression = httpCompression;
@@ -562,10 +607,10 @@ public class Configuration {
     /**
      * Activate websocket protocol compression.
      * Uses {@code permessage-deflate} encoding only.
-     * <p/>
+     * <p>
      * Default is <code>true</code>
      *
-     * @param websocketCompression
+     * @param websocketCompression - <code>true</code> to use websocket compression
      */
     public void setWebsocketCompression(boolean websocketCompression) {
         this.websocketCompression = websocketCompression;
@@ -574,4 +619,41 @@ public class Configuration {
         return websocketCompression;
     }
 
+    public boolean isRandomSession() {
+        return randomSession;
+    }
+
+    public void setRandomSession(boolean randomSession) {
+        this.randomSession = randomSession;
+    }
+
+    /**
+     * Enable/disable client authentication.
+     * Has no effect unless a trust store has been provided.
+     *
+     * Default is <code>false</code>
+     *
+     * @param needClientAuth - <code>true</code> to use client authentication
+     */
+    public void setNeedClientAuth(boolean needClientAuth) {
+        this.needClientAuth = needClientAuth;
+    }
+    public boolean isNeedClientAuth() {
+        return needClientAuth;
+    }
+
+    public HttpRequestDecoderConfiguration getHttpRequestDecoderConfiguration() {
+        return httpRequestDecoderConfiguration;
+    }
+
+    public void setHttpRequestDecoderConfiguration(HttpRequestDecoderConfiguration httpRequestDecoderConfiguration) {
+        this.httpRequestDecoderConfiguration = httpRequestDecoderConfiguration;
+    }
+
+    public HttpDecoderConfig getHttpDecoderConfig() {
+        return new HttpDecoderConfig()
+                .setMaxInitialLineLength(httpRequestDecoderConfiguration.getMaxInitialLineLength())
+                .setMaxHeaderSize(httpRequestDecoderConfiguration.getMaxHeaderSize())
+                .setMaxChunkSize(httpRequestDecoderConfiguration.getMaxChunkSize());
+    }
 }

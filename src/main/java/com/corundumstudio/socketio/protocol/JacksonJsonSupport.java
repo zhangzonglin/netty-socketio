@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,9 @@
  */
 package com.corundumstudio.socketio.protocol;
 
-import io.netty.buffer.ByteBufInputStream;
-import io.netty.buffer.ByteBufOutputStream;
-import io.netty.util.internal.PlatformDependent;
-
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,9 +62,13 @@ import com.fasterxml.jackson.databind.ser.BeanSerializerModifier;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 import com.fasterxml.jackson.databind.type.ArrayType;
 
+import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
+import io.netty.util.internal.PlatformDependent;
+
 public class JacksonJsonSupport implements JsonSupport {
 
-    private class AckArgsDeserializer extends StdDeserializer<AckArgs> {
+    protected class AckArgsDeserializer extends StdDeserializer<AckArgs> {
 
         private static final long serialVersionUID = 7810461017389946707L;
 
@@ -152,7 +154,7 @@ public class JacksonJsonSupport implements JsonSupport {
 
     }
 
-    private class EventDeserializer extends StdDeserializer<Event> {
+    protected class EventDeserializer extends StdDeserializer<Event> {
 
         private static final long serialVersionUID = 8178797221017768689L;
 
@@ -271,7 +273,7 @@ public class JacksonJsonSupport implements JsonSupport {
     }
 
 
-    private class ExBeanSerializerModifier extends BeanSerializerModifier {
+    protected static class ExBeanSerializerModifier extends BeanSerializerModifier {
 
         private final ByteArraySerializer serializer = new ByteArraySerializer();
 
@@ -337,19 +339,19 @@ public class JacksonJsonSupport implements JsonSupport {
     @Override
     public <T> T readValue(String namespaceName, ByteBufInputStream src, Class<T> valueType) throws IOException {
         namespaceClass.set(namespaceName);
-        return objectMapper.readValue(src, valueType);
+        return objectMapper.readValue((InputStream)src, valueType);
     }
 
     @Override
     public AckArgs readAckArgs(ByteBufInputStream src, AckCallback<?> callback) throws IOException {
         currentAckClass.set(callback);
-        return objectMapper.readValue(src, AckArgs.class);
+        return objectMapper.readValue((InputStream)src, AckArgs.class);
     }
 
     @Override
     public void writeValue(ByteBufOutputStream out, Object value) throws IOException {
         modifier.getSerializer().clear();
-        objectMapper.writeValue(out, value);
+        objectMapper.writeValue((OutputStream)out, value);
     }
 
     @Override

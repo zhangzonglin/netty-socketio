@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import com.corundumstudio.socketio.protocol.PacketType;
 
 /**
  * Ack request received from Socket.IO client.
- * You can always check is it <code>true<code> through
+ * You can always check is it <code>true</code> through
  * {@link #isAckRequested()} method.
  *
  * You can call {@link #sendAckData} methods only during
@@ -80,7 +80,7 @@ public class AckRequest {
         if (!isAckRequested() || !sended.compareAndSet(false, true)) {
             return;
         }
-        Packet ackPacket = new Packet(PacketType.MESSAGE);
+        Packet ackPacket = new Packet(PacketType.MESSAGE, client.getEngineIOVersion());
         ackPacket.setSubType(PacketType.ACK);
         ackPacket.setAckId(originalPacket.getAckId());
         ackPacket.setData(objs);

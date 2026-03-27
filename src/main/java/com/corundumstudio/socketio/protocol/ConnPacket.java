@@ -1,5 +1,5 @@
 /**
- * Copyright 2012 Nikita Koksharov
+ * Copyright (c) 2012-2023 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,13 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.corundumstudio.socketio.transport;
+package com.corundumstudio.socketio.protocol;
 
-import io.netty.channel.ChannelInboundHandlerAdapter;
+import java.util.UUID;
 
-import com.corundumstudio.socketio.Disconnectable;
+public class ConnPacket {
 
-@Deprecated
-public abstract class BaseTransport extends ChannelInboundHandlerAdapter implements Disconnectable {
+    private final UUID sid;
 
+    public ConnPacket(UUID sid) {
+        this.sid = sid;
+    }
+
+    public UUID getSid() {
+        return sid;
+    }
 }
